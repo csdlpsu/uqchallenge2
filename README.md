@@ -12,10 +12,15 @@ attempts to use Gaussian process models and Monte-Carlo simulations to model the
 
 ## Dependencies
 Matplotlib: pip install matplotlib
+
 Pandas: pip install pandas
+
 Numpy: pip install numpy
+
 Scipy: pip install scipy
+
 Botorch: pip install botorch
+
 XFOIL: https://web.mit.edu/drela/Public/web/xfoil/
 
 ## Papers
