@@ -10,14 +10,14 @@ ranges and number of training points, modify the highlighted blocks at the top.
 import uqlib as uq
 from pyDOE import lhs    
 import numpy as np
-import pandas as pd
+import os
 ##################################
 #Modify stuff here
 re_range = [7e5*.995, 7e5 * 1.005]
 alpha_range = [-5,10]
 flap_range = [-5,15]
 num = 100
-outpath = f"training/training_{num}.csv"
+outpath = f"data/training/training_{num}.npy"
 #################################
 
 #desired sampling points
@@ -54,10 +54,10 @@ for i in range(num):
         training_list.append(data)
 print(f"{fail_count}/{num} failed to converge")
 if training_list:
-    print("Exporting to csv...")
+    print("Exporting to npy...")
+    os.makedirs(os.path.dirname(outpath), exist_ok=True)
     training_array = np.array(training_list)
-    df = pd.DataFrame(training_array, columns=["re","alpha","flap","cl", "cd", "cm"])
-    df.to_csv(outpath,index=False)
+    np.save(outpath, training_array)
 else:
     print("Empty data. Nothing written to file")
         

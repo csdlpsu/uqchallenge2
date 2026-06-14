@@ -23,6 +23,23 @@ import time
 import os
 import subprocess
 
+INPUT_LABELS = ["Re", "alpha", "flap"]
+OUTPUT_LABELS = ["CL", "CD", "CM"]
+
+DEFAULT_BOUNDS = torch.tensor(
+    [[7e5 * 0.995, -5.0, -5.0], [7e5 * 1.005, 10.0, 15.0]],
+    dtype=torch.float64,
+)
+DEFAULT_INPUT_DELTA = torch.tensor([7e5 * 0.005, 0.02, 0.1], dtype=torch.float64)
+DEFAULT_BASE_YVAR = [1e-5, 1e-8, 1e-7]
+DEFAULT_CORRECTION_YVAR = [1e-6, 1e-10, 1e-9]
+DEFAULT_TRAINING_PATH = "data/training/training_100.npy"
+DEFAULT_TRAINING_FALLBACK_PATH = "training/training_100.csv"
+DEFAULT_TRUTH_PATH = "data/truth/given_truths.npy"
+DEFAULT_TRUTH_FALLBACK_PATH = "given_truths.csv"
+DEFAULT_DESIRED_PATH = "data/truth/desired_truths.npy"
+DEFAULT_DESIRED_FALLBACK_PATH = "desired_truths.csv"
+
 def read_xfoil_polar(re,alpha,flap, filename):
     """
 
@@ -200,10 +217,18 @@ class Batch():
 
 
 def loadTrainingData(filename, x_cols, y_col):
-    df = pd.read_csv(filename)
-    x_data = torch.tensor(df.iloc[:, x_cols].values, dtype=torch.float64)
-    y_data = torch.tensor(df.iloc[:, y_col].values, dtype=torch.float64)
+    if filename.endswith(".npy"):
+        values = np.load(filename)
+    else:
+        values = pd.read_csv(filename).values
+
+    x_data = torch.tensor(values[:, x_cols], dtype=torch.float64)
+    y_data = torch.tensor(values[:, y_col], dtype=torch.float64)
     return x_data, y_data
+
+
+def existing_path(preferred_path, fallback_path):
+    return preferred_path if os.path.exists(preferred_path) else fallback_path
 
 
 
@@ -223,6 +248,106 @@ def makeCorrectionModel(xdata, ydata, model, bounds, train_yvar):
 
     else:
         raise TypeError("model must be Model or Batch")
+
+
+def build_default_models(
+    training_path=None,
+    truth_path=None,
+    bounds=DEFAULT_BOUNDS,
+):
+    """
+    Build the base XFOIL surrogate and the truth-data residual correction model.
+    """
+    if training_path is None:
+        training_path = existing_path(DEFAULT_TRAINING_PATH, DEFAULT_TRAINING_FALLBACK_PATH)
+    if truth_path is None:
+        truth_path = existing_path(DEFAULT_TRUTH_PATH, DEFAULT_TRUTH_FALLBACK_PATH)
+
+    xfoil_x, xfoil_y = loadTrainingData(training_path, [0, 1, 2], [3, 4, 5])
+    xfoil_model = Batch(xfoil_x, xfoil_y, bounds, DEFAULT_BASE_YVAR)
+
+    true_x, true_y = loadTrainingData(truth_path, [0, 1, 2], [3, 4, 5])
+    corrector = makeCorrectionModel(
+        true_x,
+        true_y,
+        xfoil_model,
+        bounds,
+        DEFAULT_CORRECTION_YVAR,
+    )
+    return xfoil_model, corrector, true_x, true_y
+
+
+def uniform_input_samples(x0, n_samples, delta=DEFAULT_INPUT_DELTA):
+    """
+    Sample uniformly around a center point using the UQ Challenge input intervals.
+    """
+    x_min = x0 - delta
+    x_max = x0 + delta
+    samples = np.random.uniform(
+        low=x_min.detach().cpu().numpy(),
+        high=x_max.detach().cpu().numpy(),
+        size=(n_samples, x0.numel()),
+    )
+    return torch.from_numpy(samples).double()
+
+
+def monte_carlo_case(x0, xfoil_model, corrector, n_samples):
+    """
+    Run one Monte Carlo case and return tensors needed for plotting and analysis.
+    """
+    x_samples = uniform_input_samples(x0, n_samples)
+    y_base = xfoil_model.query(x_samples)
+    y_corr = corrector.query(x_samples)
+    y_combined = y_base + y_corr
+
+    x0_batch = x0.unsqueeze(0)
+    y_center_base = xfoil_model.query(x0_batch)
+    y_center_corr = corrector.query(x0_batch)
+
+    return {
+        "x_samples": x_samples.detach().cpu().numpy(),
+        "y_base": y_base.detach().cpu().numpy(),
+        "y_corr": y_corr.detach().cpu().numpy(),
+        "y_combined": y_combined.detach().cpu().numpy(),
+        "y_center_base": y_center_base.detach().cpu().numpy()[0],
+        "y_center_corr": y_center_corr.detach().cpu().numpy()[0],
+        "y_center_combined": (
+            y_center_base + y_center_corr
+        ).detach().cpu().numpy()[0],
+    }
+
+
+def run_monte_carlo(points, xfoil_model, corrector, n_samples):
+    cases = [monte_carlo_case(point, xfoil_model, corrector, n_samples) for point in points]
+    return {
+        "x_points": points.detach().cpu().numpy(),
+        "x_samples": np.stack([case["x_samples"] for case in cases]),
+        "y_base": np.stack([case["y_base"] for case in cases]),
+        "y_corr": np.stack([case["y_corr"] for case in cases]),
+        "y_combined": np.stack([case["y_combined"] for case in cases]),
+        "y_center_base": np.stack([case["y_center_base"] for case in cases]),
+        "y_center_corr": np.stack([case["y_center_corr"] for case in cases]),
+        "y_center_combined": np.stack(
+            [case["y_center_combined"] for case in cases]
+        ),
+        "input_labels": np.array(INPUT_LABELS),
+        "output_labels": np.array(OUTPUT_LABELS),
+    }
+
+
+def save_npy_results(results, output_dir):
+    os.makedirs(output_dir, exist_ok=True)
+    for name, values in results.items():
+        np.save(os.path.join(output_dir, f"{name}.npy"), values)
+
+
+def load_npy_results(input_dir):
+    results = {}
+    for filename in os.listdir(input_dir):
+        if filename.endswith(".npy"):
+            name = os.path.splitext(filename)[0]
+            results[name] = np.load(os.path.join(input_dir, filename), allow_pickle=True)
+    return results
 
 def save_model(obj, path):
     """

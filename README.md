@@ -11,17 +11,57 @@ However, the truth data had uncertainties in the conditions (angle of attack, fl
 attempts to use Gaussian process models and Monte-Carlo simulations to model the system and predict the coefficients and uncertainties in those coefficients.
 
 ## Dependencies
-Matplotlib: pip install matplotlib
+Install the Python dependencies with:
 
-Pandas: pip install pandas
+```bash
+pip install -r requirements.txt
+```
 
-Numpy: pip install numpy
+XFOIL is also required for generating new aerodynamic training data:
+https://web.mit.edu/drela/Public/web/xfoil/
 
-Scipy: pip install scipy
+## Workflow
+The scripts separate numerical data generation from plotting. Monte Carlo
+outputs are saved as `.npy` files, and the plotting script reads those saved
+arrays instead of rerunning the models.
 
-Botorch: pip install botorch
+1. Convert the checked-in CSV files to the `.npy` data layout:
 
-XFOIL: https://web.mit.edu/drela/Public/web/xfoil/
+   ```bash
+   python prepare_data.py
+   ```
+
+2. Generate Monte Carlo validation arrays:
+
+   ```bash
+   python validation.py
+   ```
+
+3. Generate Monte Carlo prediction arrays:
+
+   ```bash
+   python prediction.py
+   ```
+
+4. Plot saved `.npy` results:
+
+   ```bash
+   python plot_results.py all
+   ```
+
+Source `.npy` files are saved under `data/`. Monte Carlo result arrays are
+saved under `results/`. Figures are saved under `plots/`.
+
+## Repository layout
+- `uqlib.py`: shared XFOIL, Gaussian process, correction model, Monte Carlo,
+  and `.npy` helper functions.
+- `prepare_data.py`: converts checked-in CSV data to `.npy`.
+- `xfoil_training.py`: generates new XFOIL training data and saves it to
+  `data/training/training_100.npy`.
+- `validation.py`: saves validation Monte Carlo arrays to `results/validation/`.
+- `prediction.py`: saves requested prediction Monte Carlo arrays to
+  `results/prediction/`.
+- `plot_results.py`: creates plots from saved `.npy` arrays.
 
 ## Papers
 https://pure.psu.edu/en/publications/uncertainty-quantification-via-latent-gaussian-process-surrogates/
