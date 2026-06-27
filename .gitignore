@@ -1,6 +1,23 @@
 __pycache__/
+.DS_Store
 prediction_plots/
 validation_plots/
 /training/
 plots/
 xfoil
+
+# Local paper/figure outputs.
+distributional_calibration.pdf
+paper/**/*.aux
+paper/**/*.bbl
+paper/**/*.blg
+paper/**/*.fdb_latexmk
+paper/**/*.fls
+paper/**/*.log
+paper/**/*.out
+paper/**/*.pdf
+paper/**/*.png
+paper/**/*.synctex.gz
+paper/**/*.zip
+paper/**/figures/
+results/distributional_calibrated_prediction/

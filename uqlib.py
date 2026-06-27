@@ -202,6 +202,13 @@ class Model():
         pred = self.gp.posterior(test_x)
         return pred.mean.detach().squeeze(-1)
 
+    def posterior_mean_cov(self, test_x):
+        pred = self.gp.posterior(test_x.double())
+        return (
+            pred.mean.detach().squeeze(-1),
+            pred.mvn.covariance_matrix.detach(),
+        )
+
 class Batch():
     def __init__(self, xdata, ydata, bounds, train_yvar):
         """
@@ -214,6 +221,194 @@ class Batch():
 
     def query(self, test_x):
         return torch.stack([model.query(test_x) for model in self.models], dim=1)
+
+    def posterior_mean_cov(self, test_x):
+        means = []
+        covariances = []
+        for model in self.models:
+            mean, covariance = model.posterior_mean_cov(test_x)
+            means.append(mean)
+            covariances.append(covariance)
+        return torch.stack(means, dim=1), torch.stack(covariances, dim=0)
+
+
+class DistributionallyCalibratedCorrectedBatch:
+    """
+    Moment-calibrated corrected GP.
+
+    The calibration follows the moment-replacement construction in
+    distributional_calibration.pdf. At calibration locations, the corrected GP
+    mean matches each epistemic interval centroid and the pointwise 95% band
+    matches the interval edges.
+    """
+
+    def __init__(
+        self,
+        xfoil_model,
+        correction_model,
+        calibration_x,
+        interval_left,
+        interval_right,
+        z_value=1.96,
+        jitter=1e-12,
+    ):
+        self.xfoil_model = xfoil_model
+        self.correction_model = correction_model
+        self.calibration_x = calibration_x.double()
+        self.interval_left = torch.tensor(interval_left, dtype=torch.float64)
+        self.interval_right = torch.tensor(interval_right, dtype=torch.float64)
+        self.target_center = 0.5 * (self.interval_left + self.interval_right)
+        half_width = 0.5 * (self.interval_right - self.interval_left)
+        self.target_variance = (half_width / z_value) ** 2
+        self.jitter = jitter
+
+    def _uncalibrated_mean_cov(self, test_x):
+        base_mean, base_cov = self.xfoil_model.posterior_mean_cov(test_x)
+        corr_mean, corr_cov = self.correction_model.posterior_mean_cov(test_x)
+        return base_mean + corr_mean, base_cov + corr_cov
+
+    def mean_variance(self, test_x):
+        test_x = test_x.double()
+        n_test = test_x.shape[0]
+        n_calibration = self.calibration_x.shape[0]
+        joint_x = torch.cat([test_x, self.calibration_x], dim=0)
+        joint_mean, joint_cov = self._uncalibrated_mean_cov(joint_x)
+
+        calibrated_means = []
+        calibrated_variances = []
+
+        for output_idx in range(joint_mean.shape[1]):
+            mean_x = joint_mean[:n_test, output_idx]
+            mean_t = joint_mean[n_test:, output_idx]
+            cov = joint_cov[output_idx]
+
+            k_xx = cov[:n_test, :n_test]
+            k_xt = cov[:n_test, n_test:]
+            k_tt = cov[n_test:, n_test:]
+            k_tt = k_tt + self.jitter * torch.eye(
+                n_calibration, dtype=torch.float64
+            )
+
+            chol = torch.linalg.cholesky(k_tt)
+            residual = self.target_center[:, output_idx] - mean_t
+            alpha = torch.cholesky_solve(residual.unsqueeze(-1), chol).squeeze(-1)
+            calibrated_mean = mean_x + k_xt @ alpha
+
+            k_tx = k_xt.transpose(0, 1)
+            ktt_inv_ktx = torch.cholesky_solve(k_tx, chol)
+            kriging_reduction = torch.sum(k_xt * ktt_inv_ktx.transpose(0, 1), dim=1)
+            target_variance = self.target_variance[:, output_idx]
+            replacement_variance = torch.sum(
+                (ktt_inv_ktx**2) * target_variance.unsqueeze(-1),
+                dim=0,
+            )
+            calibrated_variance = (
+                torch.diag(k_xx) - kriging_reduction + replacement_variance
+            ).clamp_min(0.0)
+
+            calibrated_means.append(calibrated_mean)
+            calibrated_variances.append(calibrated_variance)
+
+        return (
+            torch.stack(calibrated_means, dim=1),
+            torch.stack(calibrated_variances, dim=1),
+        )
+
+    def query(self, test_x):
+        mean, _ = self.mean_variance(test_x)
+        return mean.detach()
+
+    def sample(self, test_x):
+        mean, variance = self.mean_variance(test_x)
+        return mean + torch.randn_like(mean) * torch.sqrt(variance)
+
+
+class MarginallyCalibratedCorrectedBatch:
+    """
+    Case-wise moment calibration for input-marginalized prediction samples.
+
+    The conditional calibrated GP matches the supplied bounds at the center
+    input. This wrapper rescales that predictive distribution so the response
+    marginalized over each input uncertainty box matches the same target mean
+    and Gaussian-equivalent variance.
+    """
+
+    def __init__(
+        self,
+        conditional_model,
+        calibration_x,
+        interval_left,
+        interval_right,
+        n_calibration_samples=1000,
+        input_delta=DEFAULT_INPUT_DELTA,
+        z_value=1.96,
+        seed=12345,
+        min_variance=1e-18,
+    ):
+        self.conditional_model = conditional_model
+        self.calibration_x = calibration_x.double()
+        self.interval_left = torch.tensor(interval_left, dtype=torch.float64)
+        self.interval_right = torch.tensor(interval_right, dtype=torch.float64)
+        self.target_center = 0.5 * (self.interval_left + self.interval_right)
+        half_width = 0.5 * (self.interval_right - self.interval_left)
+        self.target_variance = (half_width / z_value) ** 2
+        self.input_delta = input_delta.double()
+        self.min_variance = min_variance
+
+        rng = np.random.default_rng(seed)
+        marginal_means = []
+        marginal_variances = []
+
+        for x0 in self.calibration_x:
+            design = self._uniform_input_samples(x0, n_calibration_samples, rng)
+            mean, variance = self.conditional_model.mean_variance(design)
+            marginal_mean = mean.mean(dim=0)
+            marginal_variance = variance.mean(dim=0) + mean.var(dim=0, unbiased=False)
+            marginal_means.append(marginal_mean)
+            marginal_variances.append(marginal_variance.clamp_min(min_variance))
+
+        self.source_marginal_mean = torch.stack(marginal_means, dim=0)
+        self.source_marginal_variance = torch.stack(marginal_variances, dim=0)
+        self.mean_shift = self.target_center - self.source_marginal_mean
+        self.std_scale = torch.sqrt(
+            self.target_variance
+            / self.source_marginal_variance.clamp_min(min_variance)
+        )
+
+    def _uniform_input_samples(self, x0, n_samples, rng):
+        x_min = x0 - self.input_delta
+        x_max = x0 + self.input_delta
+        samples = rng.uniform(
+            low=x_min.detach().cpu().numpy(),
+            high=x_max.detach().cpu().numpy(),
+            size=(n_samples, x0.numel()),
+        )
+        return torch.from_numpy(samples).double()
+
+    def mean_variance_for_case(self, case_idx, test_x):
+        mean, variance = self.conditional_model.mean_variance(test_x)
+        source_mean = self.source_marginal_mean[case_idx]
+        target_mean = self.target_center[case_idx]
+        scale = self.std_scale[case_idx]
+        calibrated_mean = target_mean + scale * (mean - source_mean)
+        calibrated_variance = variance * scale.pow(2)
+        return calibrated_mean, calibrated_variance.clamp_min(0.0)
+
+    def sample_for_case(self, case_idx, test_x, match_sample_moments=False):
+        mean, variance = self.mean_variance_for_case(case_idx, test_x)
+        samples = mean + torch.randn_like(mean) * torch.sqrt(variance)
+
+        if match_sample_moments and samples.shape[0] > 1:
+            sample_mean = samples.mean(dim=0)
+            sample_std = samples.std(dim=0, unbiased=False).clamp_min(
+                np.sqrt(self.min_variance)
+            )
+            target_std = torch.sqrt(self.target_variance[case_idx])
+            samples = self.target_center[case_idx] + (
+                samples - sample_mean
+            ) * (target_std / sample_std)
+
+        return samples
 
 
 def loadTrainingData(filename, x_cols, y_col):
