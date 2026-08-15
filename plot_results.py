@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Plot Monte Carlo results saved by validation.py and prediction.py.
 """

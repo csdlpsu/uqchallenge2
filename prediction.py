@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Generate Monte Carlo prediction data for the requested target points.
 

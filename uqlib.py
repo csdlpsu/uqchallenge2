@@ -1,8 +1,4 @@
-# -*- coding: utf-8 -*-
 """
-@author: Geoffrey C Davis, B.S. Aerospace Engineering, The Pennsylvania State University, 2026. 
-Researcher at Computational complex engineered Systems Design Laboratory
-
 This is the main library for the UQ challenge problem. It contains code for 
 running XFOIL executables using subprocess and a botorch wrapper for 
 creating Gaussian process models. This is the 2nd version of the code, featuring
@@ -42,6 +38,7 @@ DEFAULT_DESIRED_FALLBACK_PATH = "desired_truths.csv"
 
 def read_xfoil_polar(re,alpha,flap, filename):
     """
+    Read the final converged coefficient row from an XFOIL polar file.
 
     Parameters
     ----------
@@ -56,17 +53,13 @@ def read_xfoil_polar(re,alpha,flap, filename):
 
     Returns
     -------
-    output : TYPE
-        DESCRIPTION.
-
+    tuple
+        The coefficient row and a boolean indicating whether parsing failed.
     """
     
-    #this is logic to wait for XFOIL to flush its info to the polarpath
-    max_wait = 2 #prevent infinite loops
+    max_wait = 2
     elapsed = 0
     stamp = time.time()
-    #filesize of 750 is a tad over the base size for an unfilled polar. So if the base polar has been created,
-    #but not values put into it, it will be detected
     while (not os.path.exists(filename) or (os.path.exists(filename) and os.path.getsize(filename) < 750)) and elapsed < max_wait:
         time.sleep(.05)
         elapsed = time.time() - stamp
@@ -74,20 +67,16 @@ def read_xfoil_polar(re,alpha,flap, filename):
     with open(filename, 'r') as file:
         lines = file.readlines()
 
-    # Skip header lines
     data_lines = []
     
-    #this goes through every line in polar, finds coeffs and stores
-    #get overwritten until last line, so this only returns last run in an accumulated polar file
     for line in lines:
         try:
-            #print(line)
             parts = line.strip().split()
             if len(parts) >= 5:  # Ensure enough columns]
                 cl = float(parts[1])
                 cd = float(parts[2])
                 cm = float(parts[4])
-                if abs(alpha-float(parts[0])) < 1e-3: #checking to make sure that alpha is same as expected 
+                if abs(alpha-float(parts[0])) < 1e-3:
                     data_lines=[np.array([re,alpha,flap,cl, cd, cm])]    
         except ValueError:
             continue  # Skip non-numeric lines
@@ -95,7 +84,7 @@ def read_xfoil_polar(re,alpha,flap, filename):
     if not data_lines:
         error = True
     else:
-        data_lines = data_lines[0] #if data_lines not empty, return the part inside
+        data_lines = data_lines[0]
     return data_lines,error
 
 

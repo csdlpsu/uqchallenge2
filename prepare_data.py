@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Convert checked-in CSV data files to the .npy layout used by the refactored code.
 """

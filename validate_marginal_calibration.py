@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Validate marginal distribution calibration at the overlapping truth/prediction point.
 """

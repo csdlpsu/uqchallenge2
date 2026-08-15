@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Generate Monte Carlo validation data for the seven provided truth points.
 

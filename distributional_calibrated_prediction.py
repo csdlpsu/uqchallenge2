@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Generate distributionally calibrated corrected GP prediction data.
 

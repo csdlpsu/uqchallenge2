@@ -1,0 +1,28 @@
+June 26, 2026
+
+AIAA Journal Editorial Office
+
+Dear Editor:
+
+Please consider our manuscript, "A Bayesian latent Gaussian process framework for aerodynamic uncertainty quantification with epistemic input and output uncertainty," by Geoffrey Davis and Ashwin Renganathan, for publication as a research article in AIAA Journal.
+
+This manuscript develops a Bayesian surrogate-modeling framework for aerodynamic uncertainty quantification when both the operating inputs and measured aerodynamic responses are available only through epistemic uncertainty intervals. The work is motivated by the Second AIAA Uncertainty Quantification Challenge Problem for Aerodynamics and addresses the practical problem of calibrating low-fidelity aerodynamic predictions against sparse truth data with uncertainty in both inputs and outputs.
+
+The main contribution is a latent-input Gaussian process calibration framework that combines an XFOIL-trained surrogate with a Kennedy-O'Hagan-style discrepancy model. Beyond correcting the posterior mean, the proposed distributional calibration step constrains the corrected predictive distribution so that it matches the supplied truth-data interval information. On the released prediction cases, the resulting model places 94.2--95.8% of predictive samples inside the nominal 95% truth intervals, with endpoint cumulative probabilities close to the intended 0.025 and 0.975 levels. These results demonstrate that distribution-level calibration is important for reliable aerodynamic uncertainty prediction, especially at extrapolative operating conditions.
+
+We believe the manuscript is well suited to AIAA Journal because it advances uncertainty quantification methodology for aerodynamic prediction and uses an AIAA community benchmark problem to evaluate the approach. The method is broadly relevant to simulation-based aerospace analysis, model calibration, surrogate modeling, and verification, validation, and uncertainty quantification.
+
+We confirm that this manuscript is original, has not been published previously, and is not under consideration for publication elsewhere. All authors have approved the submitted manuscript. To the best of our knowledge, there are no conflicts of interest to disclose.
+
+Thank you for your consideration.
+
+Sincerely,
+
+Geoffrey Davis
+Department of Aerospace Engineering
+The Pennsylvania State University
+
+Ashwin Renganathan
+Department of Aerospace Engineering
+Institute of Computational and Data Sciences
+The Pennsylvania State University
